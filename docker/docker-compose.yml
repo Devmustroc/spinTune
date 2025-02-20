@@ -1,0 +1,181 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spintune
+      POSTGRES_PASSWORD: spintune_password
+      POSTGRES_MULTIPLE_DATABASES: auth,playlist,track,social
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker-scripts/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh
+    ports:
+      - "5432:5432"
+    networks:
+      - spintune_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spintune"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Interface d'administration PostgreSQL
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - spintune_network
+    depends_on:
+      - postgres
+
+  # Cache Redis
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass spintune_redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - spintune_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Message Broker RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: spintune
+      RABBITMQ_DEFAULT_PASS: spintune_rabbitmq_password
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management interface
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - spintune_network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Service d'authentification
+  auth-service:
+    build:
+      context: ./backend/auth-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://spintune:spintune_password@postgres:5432/auth
+      REDIS_URL: redis://:spintune_redis_password@redis:6379
+      RABBITMQ_URL: amqp://spintune:spintune_rabbitmq_password@rabbitmq:5672
+    ports:
+      - "3001:3001"
+    networks:
+      - spintune_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Service de playlists
+  playlist-service:
+    build:
+      context: ./backend/playlist-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://spintune:spintune_password@postgres:5432/playlist
+      REDIS_URL: redis://:spintune_redis_password@redis:6379
+      RABBITMQ_URL: amqp://spintune:spintune_rabbitmq_password@rabbitmq:5672
+    ports:
+      - "3002:3002"
+    networks:
+      - spintune_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Service de pistes
+  track-service:
+    build:
+      context: ./backend/track-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://spintune:spintune_password@postgres:5432/track
+      REDIS_URL: redis://:spintune_redis_password@redis:6379
+      RABBITMQ_URL: amqp://spintune:spintune_rabbitmq_password@rabbitmq:5672
+    ports:
+      - "3003:3003"
+    networks:
+      - spintune_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Service social
+  social-service:
+    build:
+      context: ./backend/social-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://spintune:spintune_password@postgres:5432/social
+      REDIS_URL: redis://:spintune_redis_password@redis:6379
+      RABBITMQ_URL: amqp://spintune:spintune_rabbitmq_password@rabbitmq:5672
+    ports:
+      - "3004:3004"
+    networks:
+      - spintune_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    networks:
+      - spintune_network
+    depends_on:
+      - auth-service
+      - playlist-service
+      - track-service
+      - social-service
+
+networks:
+  spintune_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
