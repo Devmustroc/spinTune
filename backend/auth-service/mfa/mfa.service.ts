@@ -150,8 +150,8 @@ export class MfaService {
     /**
      * Régénère les codes de backup
      */
-    async regenerateBackupCodes(userId: string) {
-        const isValid = await this.validateToken(userId, userId);
+    async regenerateBackupCodes(userId: string, token: string) {
+        const isValid = await this.validateToken(userId, token);
         if (!isValid) {
             throw new UnauthorizedException('Code MFA ou code de backup invalide');
         }
